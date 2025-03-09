@@ -1,0 +1,543 @@
+---
+title: "Case Study Frito-Lay Attrition"
+author: "Johnny Vogt"
+date: "2025-02-22"
+output: html_document
+---
+```
+https://www.youtube.com/watch?v=Omnip4GgAfA
+#####################
+##Executive Summary:#
+#####################
+#The purpose of this case study was to determine the largest factors contributing employee attrition.In this markdown file, it will show our process that we used to determine that Salary, Department, Job Role, and Tenure have the largest impact on Attrition. Each one of them will display a significant relationship with Employee Attrition. I have created a K Nearest Neighbor Model and a Naive-Bayes model, each one of them having their strength and weaknesses.  Our KNN model achieves a higher Accuracy and Sensitivity rate at the expense of having a high occurrences of false negatives. While our Naive-Bayes model has achieved an equal Sensitivity and Specificity rate, it comes at the const of the accuracy dropping. 
+
+```
+#The first part of the code will be what packages that I used and molding the data, so that I can create visuals and gleam more data from it. 
+
+```
+#library
+library(ggplot2)
+library(ggthemes)
+library(tidyverse)
+library(dplyr)
+library(e1071)
+library(caret)
+library(class)
+library(ggthemes)
+library(GGally)
+library(scales)
+
+#BringinGGally#Bringing Frito-Lay Employee Data
+cs_1 <- read_csv("C:/Users/jvogt/Desktop/School/SMU/DS6306/Project_1/CaseStudy1-data.csv")
+
+
+#Molding Data
+##Education
+education_levels <- c("Below College", "College", "Bachelor", "Master", "Doctor")
+cs_1$Education <- factor(case_when(
+  cs_1$Education == 1 ~ "Below College",
+  cs_1$Education == 2 ~ "College",
+  cs_1$Education == 3 ~ "Bachelor",
+  cs_1$Education == 4 ~ "Master",
+  cs_1$Education == 5 ~ "Doctor"
+), levels = education_levels)
+
+##Changing Distance from Work
+cs_1 <- cs_1 %>% 
+  mutate(DistancefromHome_category = cut(DistanceFromHome, breaks = c(-Inf,1,5,10,20,Inf), labels = c("0-1 Miles","2-5 Miles", "6-10 Miles", "10-20 Miles", "20+ Miles")))
+
+##Changing Stock Option to Yes or No
+cs_1 <- cs_1 %>% 
+  mutate(StockOptionLevel_Bin = cut(DistanceFromHome, breaks = c(-Inf,1,Inf), labels = c("No","Yes")))
+
+##Making Years at work into a categorical 
+cs_1 <- cs_1 %>% 
+  mutate(YearsAtCompany_Category = cut(YearsAtCompany, breaks = c(-Inf,2,6,10,20,Inf), labels = c("0-2 Years","3-6 Years", "7-10 years", "11-20 Years", "20+ Years")))
+
+cs_1 <- cs_1 %>% 
+  mutate(YearsAtCompany_Category_2 = cut(YearsAtCompany, breaks = c(-Inf,6,Inf), labels = c("0-5 Years","6+ Years")))
+
+#Making Age Categories
+cs_1 <- cs_1 %>% 
+  mutate(Age_group = cut(Age, breaks = c(-Inf,20,30,40,50,Inf), labels = c("18-20 Years Old","21-30 Years Old","31-40 Years Old","41-50 Years Old","50+ Years Old")))
+
+#Salary Category
+cs_1 <- cs_1 %>% 
+  mutate(Sal_group = cut(Salary, breaks = c(-Inf,20,30,40,50,Inf), labels = c("18-20 Years Old","21-30 Years Old","31-40 Years Old","41-50 Years Old","50+ Years Old")))
+
+
+##Making Joblevel into Factor
+job_levels <- c("One", "Two", "Three", "Four", "Five")
+cs_1$JobLevel_Category <- factor(cs_1$JobLevel,
+                levels = 1:5,
+                labels = job_levels)
+
+##Making Attrition into a Factor
+cs_1$Attrition <- as.factor(cs_1$Attrition) 
+
+##Create Salary
+cs_1 <- cs_1 %>% mutate(Salary = MonthlyIncome *12)
+
+##Adding Attrition Cost
+cs_1 <- cs_1 %>%
+  mutate(AttritionCost = case_when(
+    JobLevel == 1 ~ Salary * 0.30,
+    JobLevel == 2 ~ Salary * 0.50,
+    JobLevel == 3 ~ Salary * 1.25,
+    JobLevel == 4 ~ Salary * 1.50,
+    JobLevel == 5 ~ Salary * 4.00,
+  ))
+
+##Factoring Departments
+cs_1$Department <- as.factor(cs_1$Department)
+levels(cs_1$Department)
+
+##Factoring Gender
+cs_1$Gender <- as.factor(cs_1$Gender)
+levels(cs_1$Gender)
+
+##Creating an Attritoned and Non-Attritioned List
+cs_1_attritioned <- cs_1 %>% filter(cs_1$Attrition == "Yes")
+cs_1_nonattritioned <- cs_1 %>% filter(cs_1$Attrition == "No")
+```
+
+#After I created the additional lists and additions columns, I went ahead and started to gather information, I tried to look for things that stood out.
+
+
+```
+#Discover how much money it cost to replace everyone by department
+cs_1 %>%
+  group_by(Department, Attrition) %>%
+  summarize(
+    count = n(),
+    total_attrition_cost = sum(AttritionCost[Attrition == "Yes"], na.rm = TRUE)
+  ) %>%
+  group_by(Department) %>%
+  mutate(percentage = count / sum(count) * 100) %>%
+  filter(Attrition == "Yes")
+  
+#How many people attritioned by age group 
+cs_1 %>%
+  group_by(Age_group) %>%
+  summarize(
+    Total = n(),
+    Attritioned = sum(Attrition == "Yes"),
+    Percentage = (Attritioned / Total) * 100
+  )
+  
+#Attrition by Education Level
+cs_1 %>%
+  group_by(Education) %>%
+  summarize(
+    Total = n(),
+    Attritioned = sum(Attrition == "Yes"),
+    Percentage = (Attritioned / Total) * 100
+  )
+
+#Attrition by JobRole
+cs_1 %>%
+  group_by(JobRole) %>%
+  summarize(
+    Total = n(),
+    Attritioned = sum(Attrition == "Yes"),
+    Percentage = (Attritioned / Total) * 100
+  )
+  
+#Total Working Years and Attrition
+cs_1 %>%
+  group_by(TotalWorkingYears) %>%
+  summarize(
+    Total = n(),
+    Attritioned = sum(Attrition == "Yes"),
+    Percentage = (Attritioned / Total) * 100
+  )
+
+#Tenure and Attrition
+cs_1 %>%
+  group_by(YearsAtCompany) %>%
+  summarize(
+    Total = n(),
+    Attritioned = sum(Attrition == "Yes"),
+    Percentage = (Attritioned / Total) * 100
+  )
+
+cs_1 %>%
+  group_by(YearsAtCompany_Category) %>%
+  summarize(
+    Total = n(),
+    Attritioned = sum(Attrition == "Yes"),
+    Percentage = (Attritioned / Total) * 100
+  )
+
+#Job Level and Attrition
+cs_1 %>%
+  group_by(JobLevel) %>%
+  summarize(
+    Total = n(),
+    Attritioned = sum(Attrition == "Yes"),
+    Percentage = (Attritioned / Total) * 100
+  )
+  
+#Distance and Attritioned
+cs_1 %>%
+  group_by(DistancefromHome_category) %>%
+  summarize(
+    Total = n(),
+    Attritioned = sum(Attrition == "Yes"),
+    Percentage = (Attritioned / Total) * 100
+  )
+
+#collecting Means and averages for data
+mean(cs_1_attritioned$Age)
+median(cs_1_attritioned$Age)
+mean(cs_1_nonattritioned$Age)
+median(cs_1_nonattritioned$Age)
+
+mean(cs_1_attritioned$DistanceFromHome)
+median(cs_1_attritioned$DistanceFromHome)
+mean(cs_1_nonattritioned$DistanceFromHome)
+median(cs_1_nonattritioned$DistanceFromHome)
+
+sum(cs_1_attritioned$Gender == "Male")
+sum(cs_1_attritioned$Gender == "Female")
+count(cs_1_attritioned)
+count(cs_1_nonattritioned)
+
+mean(cs_1_attritioned$YearsAtCompany)
+median(cs_1_attritioned$YearsAtCompany)
+mean(cs_1_nonattritioned$YearsAtCompany)
+median(cs_1_nonattritioned$YearsAtCompany)
+
+mean(cs_1_attritioned$YearsInCurrentRole)
+median(cs_1_attritioned$YearsInCurrentRole)
+mean(cs_1_nonattritioned$YearsInCurrentRole)
+median(cs_1_nonattritioned$YearsInCurrentRole)
+
+mean(cs_1_attritioned$YearsSinceLastPromotion)
+median(cs_1_attritioned$YearsSinceLastPromotion)
+mean(cs_1_nonattritioned$YearsSinceLastPromotion)
+median(cs_1_nonattritioned$YearsSinceLastPromotion)
+
+cs_1 %>%
+  group_by(Gender) %>%
+  summarize(
+    Total = n(),
+    Attritioned = sum(Attrition == "Yes"),
+    Percentage = (Attritioned / Total) * 100
+  )
+
+cs_1 %>%
+  group_by(Gender) %>%
+  summarize(
+    Total = n(),
+    noAttritioned = sum(Attrition == "No"),
+    Percentage = (noAttritioned / Total) * 100
+  )
+
+cs_1 %>%
+  group_by(Department) %>%
+  summarize(
+    Total = n(),
+    noAttritioned = sum(Attrition == "No"),
+    Percentage = (noAttritioned / Total) * 100
+  )
+    
+mean(cs_1_attritioned$Salary)
+median(cs_1_attritioned$Salary)
+mean(cs_1_nonattritioned$Salary)
+median(cs_1_nonattritioned$Salary)
+
+mean(cs_1_attritioned$JobLevel)
+median(cs_1_attritioned$JobLevel)
+mean(cs_1_nonattritioned$JobLevel)
+median(cs_1_nonattritioned$JobLevel)
+
+```
+
+#After collecting Data on why people left, I started to prepare graphs to visualize some of the data. Some of the relationships and correlation start to become visible here. 
+
+```
+#DO NOT USE, Age Histogram 
+cs_1 %>%
+  group_by(MaritalStatus) %>%
+  ggplot(mapping = aes(x = Age)) +
+  geom_histogram(binwidth = 1) + 
+  xlab("Employee Age") +
+  ylab("Employee Count") +
+  ggtitle("Histogram of Employee Ages") +
+  theme_solarized()
+  
+#Salary Box Plot by Distance_Category
+cs_1 %>%
+  ggplot(mapping = aes(x = DistancefromHome_category, y = Salary, fill = Attrition )) + 
+  geom_boxplot(show.legend = FALSE) +
+  scale_y_continuous(labels = comma) +
+  ggtitle("Salary Boxplots", subtitle = "Seperated by Commute Groups and Attrition Status") +
+  theme_wsj() +
+  theme(plot.subtitle = element_text(size = 15))
+
+#Salary Box Plot by Job Role
+cs_1 %>%
+  ggplot(mapping = aes(x = JobRole, y = Salary, fill = Attrition )) + 
+  geom_boxplot(show.legend = FALSE) +
+  scale_y_continuous(labels = comma) +
+  ggtitle("Salary Boxplots", subtitle = "Seperated by Roles and Attrition Status") +
+  theme_wsj() +
+  theme(plot.subtitle = element_text(size = 15), axis.text.x = element_text(angle = 45, hjust = 1))
+
+#Salary Box Plot by Age_Group
+cs_1 %>%
+  ggplot(mapping = aes(x = Age_group, y = Salary, fill = Attrition )) + 
+  geom_boxplot(show.legend = FALSE) +
+  scale_y_continuous(labels = comma) +
+  ggtitle("Salary Boxplots", subtitle = "Seperated by Age Group and Attrition Status") +
+  theme_wsj() +
+  theme(plot.subtitle = element_text(size = 15))
+
+#Salary Box Plot by Department
+cs_1 %>%
+  ggplot(mapping = aes(x = Department, y = Salary, fill = Attrition )) + 
+  geom_boxplot(show.legend = FALSE) +
+  scale_y_continuous(labels = comma) +
+  ggtitle("Salary Boxplots", subtitle = "Seperated by Departments and Attrition Status") +
+  theme_wsj() +
+  theme(plot.subtitle = element_text(size = 15))
+
+#Bar Plot, Department Dodge with Attrition
+cs_1 %>%
+  ggplot( aes(x = Department, fill = Attrition)) +
+  geom_bar(position = "dodge") +
+  scale_fill_brewer(palette = "Set2") +
+  ggtitle("Retained Employee's Bar Chart of Age Groups", subtitle = "Seperated by Job Level") +
+  xlab("Age Groups") +
+  xlab("Count") +
+  theme_wsj() +
+  theme(plot.title = element_text(size = 20),plot.subtitle = element_text(size = 15), legend.title = element_text(size = 13) )
+
+#Scatter Plot Age v. Salary Attritioned  
+cs_1_attritioned %>% 
+  ggplot(mapping = aes(x = Age, y = Salary, color = YearsAtCompany_Category_2)) +
+  geom_point(position = "jitter") +
+  ggtitle("Attritioned Employee Scatter Plot", subtitle = "Relationship between Salary and Age") +
+  scale_y_continuous(labels = comma) +
+  theme_wsj() +
+  labs(color = "Years at Company") +
+  theme(legend.title = element_text(size = 15), plot.subtitle = element_text(size = 15))
+
+#Scatter Plot Age v. Salary Non-Attritioned
+cs_1_nonattritioned %>% 
+  ggplot(mapping = aes(x = Age, y = Salary, color = YearsAtCompany_Category_2)) +
+  geom_point(position = "jitter") +
+  ggtitle("Non-Attritioned Employee Scatter Plot", subtitle = "Relationship between Salary and Age") +
+  scale_y_continuous(labels = comma) +
+  theme_wsj() +
+  labs(color = "Years at Company") +
+  theme(legend.title = element_text(size = 15), plot.subtitle = element_text(size = 15))  
+```
+#Models, one of each KNN and NB Model. 
+
+```
+##KNN
+#setting parameters of the Model
+iterations_knn = 500
+numks = 90
+splitPerc_knn = .7
+
+#Creating buckets to collect every iteration's Acc, Sen, Spec
+masterAcc_knn = matrix(nrow = iterations_knn, ncol = numks)
+masterSen_knn = matrix(nrow = iterations_knn, ncol = numks)
+masterSpec_knn = matrix(nrow = iterations_knn, ncol = numks)
+
+#A loop to hypertune the K - Value
+for(j in 1:iterations_knn)
+{
+  trainIndices_knn = sample(1:dim(cs_1)[1],round(splitPerc_knn * dim(cs_1)[1]))
+  train_knn = cs_1[trainIndices_knn,]
+  test_knn = cs_1[-trainIndices_knn,]
+  for(i in 1:numks)
+  {
+    classifications_knn = knn(train_knn[,c("YearsAtCompany", "Salary", "DistanceFromHome", "JobLevel")], test_knn[,c("YearsAtCompany", "Salary", "DistanceFromHome", "JobLevel")], train_knn$Attrition, prob = TRUE, k = i)
+    table(classifications_knn,test_knn$Attrition)
+    CM_knn = confusionMatrix(table(classifications_knn,test_knn$Attrition))
+    masterAcc_knn[j,i] = CM_knn$overall[1]
+    masterSpec_knn[j,i] = CM_knn$byClass["Specificity"]
+    masterSen_knn[j,i] = CM_knn$byClass["Sensitivity"]
+  }
+}
+
+#Collect Means of ALL Iterations
+MeanAcc_knn = colMeans(masterAcc_knn)
+MeanSpec_knn = colMeans(masterSpec_knn)
+MeanSen_knn = colMeans(masterSen_knn)
+
+#Plotting each Iterations Acc, Spec, and Sen Value to see which K Value is best to use
+plot(seq(1,numks,1),MeanAcc_knn, type = "l", main = "Mean Accuracy of Each K Value",
+     xlab = "K Value", ylab = "Accuracy") 
+plot(seq(1,numks,1),MeanSpec_knn, type = "l", main = "Mean Specificity of Each K Value",
+     xlab = "K Value", ylab = "Accuracy")
+plot(seq(1,numks,1),MeanSen_knn, type = "l", main = "Mean Sensitivvity of Each K Value",
+     xlab = "K Value", ylab = "Accuracy")
+
+#Setting Thresholds and running the KNN Model with the optimum K Value
+
+classifications_knn = knn(train_knn[,c("Age", "Salary")],test_knn[,c("Age", "Salary")],train_knn$Attrition, prob = TRUE, k = 40)
+
+#Sanity Checks (SC)
+classifications_knn
+
+attributes(classifications_knn)
+
+attributes(classifications_knn)$prob 
+
+ # Compute probabilities specifically for the "Attritioned" class, adjusting based on predicted labels
+probs_knn = ifelse(classifications_knn == "Attrition", attributes(classifications_knn)$prob, 1 - attributes(classifications_knn)$prob)
+classifications_knn[1:261] # Just the labels
+
+#SC
+probs_knn
+
+# Setting Threshold
+summary(test_knn$Attrition)
+threshold_knn = .154
+
+# Apply the new threshold to reclassify observations
+NewClass_knn = ifelse(probs_knn > threshold_knn, "Yes", "No")
+
+#Making NewClass_knn into a factor
+NewClass_knn <- as.factor(NewClass_knn)
+
+# Make a table of the new classifications
+table(NewClass_knn, test_knn$Attrition)
+
+# Create a confusion matrix
+CM_knn = confusionMatrix(table(NewClass_knn, test_knn$Attrition), mode = "everything")
+# Display the confusion matrix
+CM_knn
+
+##Naive-Bayes
+#NB Loop for average of many training / test partition
+
+iterations_nb = 500
+
+masterAcc_nb = matrix(nrow = iterations_nb)
+Sen_nb = matrix(nrow = iterations_nb)
+Spec_nb = matrix(nrow = iterations_nb)
+
+
+splitPerc_nb = .7 #Training / Test split Percentage
+
+for(j in 1:iterations_nb)
+{
+  #Creating Sample at a 70% and %30 Split
+  trainIndices_nb = sample(1:dim(cs_1)[1],round(splitPerc_nb * dim(cs_1)[1]))
+  train_nb = cs_1[trainIndices_nb,]
+  test_nb = cs_1[-trainIndices_nb,]
+  model_nb = naiveBayes(Attrition~ Age_group +YearsAtCompany + DistancefromHome_category + JobRole + Salary, + Department + JobLevel,data = train_nb,laplace = 1)
+  #Define a new threshold 
+  threshold_nb = .3
+  predictions_nb = predict((model_nb,test_nb), type = "class")
+  NewClass_nb = ifelse(predictions_nb[,2] > threshold_nb, "Yes", "No")
+  #Making a factor
+  NewClass_nb <- as.factor(NewClass_nb)
+  test_nb$Attrition <- as.factor(test_nb$Attrition)
+  CM_nb = confusionMatrix(table(NewClass_nb, test_nb$Attrition), mode = "everything")
+  masterAcc_nb[j] = CM_nb$overall["Accuracy"]
+  Sen_nb[j] = CM_nb$byClass["Sensitivity"]
+  Spec_nb[j] = CM_nb$byClass["Specificity"]
+}
+
+MeanAcc_nb = colMeans(masterAcc_nb)
+MeanSen_nb = colMeans(Sen_nb)
+MeanSpec_nb = colMeans(Spec_nb)
+MeanAcc_nb
+MeanSen_nb
+MeanSpec_nb 
+
+CM_nb
+```
+##############
+##Comp Set
+##############
+
+```
+compset$Education <- factor(case_when(
+  compset$Education == 1 ~ "Below College",
+  compset$Education == 2 ~ "College",
+  compset$Education == 3 ~ "Bachelor",
+  compset$Education == 4 ~ "Master",
+  compset$Education == 5 ~ "Doctor"
+), levels = education_levels)
+
+##Changing Distance from Work
+compset <- compset %>% 
+  mutate(DistancefromHome_category = cut(DistanceFromHome, breaks = c(-Inf,1,5,10,20,Inf), labels = c("0-1 Miles","2-5 Miles", "6-10 Miles", "10-20 Miles", "20+ Miles")))
+
+##Changing Stock Option to Yes or No
+compset <- compset %>% 
+  mutate(StockOptionLevel_Bin = cut(DistanceFromHome, breaks = c(-Inf,1,Inf), labels = c("No","Yes")))
+
+##Making Years at work into a categorical 
+compset <- compset %>% 
+  mutate(YearsAtCompany_Category = cut(YearsAtCompany, breaks = c(-Inf,2,6,10,20,Inf), labels = c("0-2 Years","3-6 Years", "7-10 years", "11-20 Years", "20+ Years")))
+
+compset <- compset %>% 
+  mutate(YearsAtCompany_Category_2 = cut(YearsAtCompany, breaks = c(-Inf,6,Inf), labels = c("0-5 Years","6+ Years")))
+
+#Making Age Categories
+compset <- compset %>% 
+  mutate(Age_group = cut(Age, breaks = c(-Inf,20,30,40,50,Inf), labels = c("18-20 Years Old","21-30 Years Old","31-40 Years Old","41-50 Years Old","50+ Years Old")))
+
+##Create Salary
+compset <- compset %>% mutate(Salary = MonthlyIncome *12)
+
+##Making Joblevel into Factor
+job_levels <- c("One", "Two", "Three", "Four", "Five")
+compset$JobLevel_Category <- factor(compset$JobLevel,
+                levels = 1:5,
+                labels = job_levels)
+
+##Making Attrition into a Factor
+compset$Attrition <- as.factor(compset$Attrition) 
+
+
+
+##Adding Attrition Cost
+compset <- compset %>%
+  mutate(AttritionCost = case_when(
+    JobLevel == 1 ~ Salary * 0.30,
+    JobLevel == 2 ~ Salary * 0.50,
+    JobLevel == 3 ~ Salary * 1.25,
+    JobLevel == 4 ~ Salary * 1.50,
+    JobLevel == 5 ~ Salary * 4.00,
+  ))
+
+##Factoring Departments
+compset$Department <- as.factor(compset$Department)
+levels(compset$Department)
+
+##Factoring Gender
+compset$Gender <- as.factor(compset$Gender)
+levels(compset$Gender)
+
+##Creating an Attritoned and Non-Attritioned List
+compset_attritioned <- compset %>% filter(compset$Attrition == "Yes")
+compset_nonattritioned <- compset %>% filter(compset$Attrition == "No")
+
+comprediction <- predict(model_nb,compset)
+
+probsNB = predict(model_nb,compset[,c("Age_group", "YearsAtCompany", "DistancefromHome_category", "JobRole", "Salary", "Department", "JobLevel")], type = "raw")
+probsNB
+
+# Apply the new threshold to reclassify observations
+comprediction = ifelse(probsNB[,2] > threshold_nb, "Yes", "No")
+comprediction
+
+# Makking a factor
+comprediction <- as.factor(comprediction)
+
+df1 <- compset$ID
+df2 <- comprediction
+Case1PredictionsClassifyVogt <- bind_cols(df1, df2)
+
+```
+
